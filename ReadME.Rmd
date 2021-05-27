@@ -166,6 +166,7 @@ The spatial lag regression is implemented in GeoDa space, which has the followin
 ![](./GIS3Regressions/GIS3GeoDaSpaceExample.png){width=50%}
 
 The Lagrange statistics are in figure 9:
+
 #### Figure 9: Lagrange multiplier statistics to choose spatial lag vs. spatial error specification
 ![](./GIS3Regressions/GIS3LagrangeStatistics.png)
 

@@ -425,9 +425,11 @@ following UI.
 
 <img src="./GIS3Regressions/GIS3GeoDaSpaceExample.png" style="width:50.0%" />
 
-The Lagrange statistics are in figure 9: \#\#\#\# Figure 9: Lagrange
-multiplier statistics to choose spatial lag vs. spatial error
-specification ![](./GIS3Regressions/GIS3LagrangeStatistics.png)
+The Lagrange statistics are in figure 9:
+
+#### Figure 9: Lagrange multiplier statistics to choose spatial lag vs. spatial error specification
+
+![](./GIS3Regressions/GIS3LagrangeStatistics.png)
 
 While both the lag and error Lagrange Multiplier statistics are
 significant, only the lag model has a robust statistic. So I choose the
