@@ -1,0 +1,321 @@
+---
+title: "GIS 3 Data processing for original input files"
+output: html_notebook
+---
+
+# Purpose of file
+This is the very first file in the coding workflow for the project. I've gathered data on pokemon spawn points, census tract polygons, census tract attributes, locations of restaurants, etc.
+
+But these need extensive data cleaning and some spatial computations (e.g. to get total number of bike trip destinations by location). The results will be saved in GIS3SpatialRawData folder.
+
+# Step 0: Libraries
+```{r}
+library(tidyverse)
+library(sf)
+library(RColorBrewer)
+library(tmap)
+setwd("~/Desktop/GIS3FinalProject")
+```
+
+# Step 1: Process pokemon points
+## Step 1.1 Load in raw pokemon data
+```{r}
+pokemon_raw <- read.csv("./GIS3RawData/pokemon-spawns.csv")
+head(pokemon_raw)
+str(pokemon_raw)
+```
+## Step 1.2: Process raw pokemon data to have spatial long lat, and count number of pokemons at each point
+```{r}
+pokemon_processing <- pokemon_raw
+colnames(pokemon_processing)
+
+# Convert string long lats to numeric long lats
+pokemon_processing$lat <- as.numeric(pokemon_processing$lat)
+pokemon_processing$lng <- as.numeric(pokemon_processing$lng)
+pokemon_processing
+
+# Count number of pokemons spawned at each long lat point of pokemon spawn
+pokemon_point_counts <-
+  pokemon_processing %>% 
+  group_by(lat, lng) %>%
+  summarize(NumPokemon = n()) %>%
+  rename(long='lng') %>%
+  arrange(long, lat)
+
+# Create ID for each long lat
+pokemon_point_counts$AllPokeLocID <- 1:nrow(pokemon_point_counts)
+
+# Relocate columns
+pokemon_point_counts <-
+  pokemon_point_counts %>%
+  relocate(AllPokeLocID, .before=lat) %>%
+  relocate(lat, .after=long)
+
+# Sanity check
+pokemon_point_counts %>% arrange(long)
+pokemon_point_counts %>% arrange(-long)
+
+# Convert long lat csv to shapefile 
+pokemon_point_counts_sf <- st_as_sf(pokemon_point_counts, coords = c("long", "lat"), crs=4326) 
+```
+
+# Step 2: Process San Francisco 2010 census tracts
+## 2.1 Load polygon file of census tracts
+```{r}
+SanFran_tracts <- st_read('./GIS3RawData/SF2010Tracts.geojson')
+
+head(SanFran_tracts)
+```
+## 2.2 Setting EPSGs and joining pokemon spawn points with counts to San Francisco tracts so that each row (point) is assigned a tract
+```{r}
+# Convert both census tract points and census tracts to epsg 7131
+pokemon_point_counts_7131 <- pokemon_point_counts_sf %>% st_transform(7131)
+SanFran_tracts_7131 <- SanFran_tracts %>% st_transform(7131)
+
+# Spatial join to give each point a tract
+pokemon_point_counts_SanFran <-
+  st_join(pokemon_point_counts_7131, 
+          SanFran_tracts_7131, join = st_within, left=FALSE) %>%
+  select(AllPokeLocID, NumPokemon, geometry, geoid10)
+
+pokemon_point_counts_SanFran$geoid10 <- as.numeric(pokemon_point_counts_SanFran$geoid10)
+pokemon_point_counts_SanFran <-
+  pokemon_point_counts_SanFran %>% rename(GeoFIPS = 'geoid10')
+
+head(pokemon_point_counts_SanFran) 
+```
+## 2.3 Find only relevant tracts that have pokemon points
+```{r}
+# Union individual points to one object so that we can intersect tracts with this point object
+unioned_pokemon_point_counts_SanFran <-
+  st_union(pokemon_point_counts_SanFran)
+
+# Select only tracts that actually have points
+relevant_SanFran_tracts_7131 <-
+  SanFran_tracts_7131 %>%
+  filter(st_intersects(., unioned_pokemon_point_counts_SanFran, sparse=FALSE)) %>%
+  mutate(GeoFIPS = as.numeric(geoid10))
+
+relevant_SanFran_tracts_7131
+```
+
+## 2.4 Quick tmap visualization of number of pokemon at each point, and only in census tracts that actually have points
+```{r}
+#SanFran_tracts_7132
+
+nrow(relevant_SanFran_tracts_7131)
+
+tm_shape(SanFran_tracts_7131) +
+  tm_polygons(alpha=0.5) +
+tm_shape(pokemon_point_counts_SanFran) +
+  tm_dots(col='NumPokemon', pal='BuPu')
+
+tm_shape(relevant_SanFran_tracts_7131) +
+  tm_polygons(alpha=0.5) +
+tm_shape(pokemon_point_counts_SanFran) +
+  tm_dots(col='NumPokemon', pal='BuPu')
+```
+# Step 3: Wrangle Census data
+## 3.1 Load in raw census socioeconomic data
+```{r}
+SanFran_ACS_raw <- read.csv("./GIS3RawData/SanFranACS.csv")
+SanFran_ACS_raw
+```
+
+## 3.2 Rename and mutate census variables to more intuitive names
+```{r}
+SanFran_ACS_renamed <-
+  SanFran_ACS_raw %>% 
+  select(Geo_FIPS, Geo_GEOID, Geo_NAME,
+         tpop = SE_A01001_001,
+         pden = SE_A00002_002,
+         apop = SE_A03001_005,
+         bpop = SE_A03001_003,
+         hpop = SE_A04001_010,
+         uemp = SE_A17005_003 / SE_A17005_001,
+         pinc = SE_A14024_001,
+         ag_rent = SE_A18005_001, # avg gross rent
+         commute = SE_A09003_001 # commute time
+         ) %>%
+  mutate(aprp = apop/tpop, bprp = bpop/tpop, hprp = hpop / tpop) %>%
+  mutate(minoprp = aprp + bprp + hprp) %>%
+  relocate(minoprp, .before= aprp) %>%
+  select(-apop, -bpop, -hpop) %>%
+  rename(GeoFIPS = 'Geo_FIPS') %>%
+  mutate(GeoFIPS = as.numeric(GeoFIPS)) %>%
+  filter(GeoFIPS %in% relevant_SanFran_tracts_7132$GeoFIPS)
+
+SanFran_ACS_renamed
+```
+## 3.3 Merge pokemon points with census tract attributes with the census tract data, so that each point is assigned census tract variable columns (e.g. population density)
+```{r}
+pokemon_point_counts_SanFran_ACS <-
+  merge(pokemon_point_counts_SanFran, SanFran_ACS_renamed, all.x=TRUE,
+        by='GeoFIPS') 
+  # a few census tracts without ACS
+
+length(unique(pokemon_point_counts_SanFran$GeoFIPS))
+
+data.frame(pokemon_point_counts_SanFran_ACS) %>% arrange(-GeoFIPS)
+
+data.frame(pokemon_point_counts_SanFran_ACS) %>% drop_na()
+```
+
+# Step 4: Cleaning data on location of "posh" restaurants in San Fran
+Posh restaurants include boba shops, coffee shops, etc. Not just usual cheap restaurants.
+
+## 4.1 Load posh restaurant data
+```{r}
+posh_restaurants_raw <- read.csv("./GIS3RawData/core_poi.csv")
+
+posh_restaurants_raw
+```
+
+## 4.2 Convert posh restaraunt data into spatial format
+```{r}
+posh_restaurants_processing <- posh_restaurants_raw
+posh_restaurants_processing <- 
+  posh_restaurants_processing %>%
+  select(placekey, location_name, lat = latitude, long=longitude)
+
+posh_restaurants_points <-
+   st_as_sf(posh_restaurants_processing, coords=c('long','lat'), crs=4326)
+```
+
+## Step 5: Clean data on general restaurants in San Fran
+
+## 5.1 Load general restaurant data
+```{r}
+restaurants_raw <-
+  read.csv("./GIS3RawData/restaurant-scores-lives-standard.csv")
+```
+
+## 5.2 Convert restaurant csv data to points via long lat
+```{r}
+restaurants_processing <- 
+  restaurants_raw %>% 
+  select(business_id, business_name, long = business_longitude, lat = business_latitude) %>%
+  drop_na()
+
+restaurants_points <- 
+  st_as_sf(restaurants_processing, coords=c('long','lat'), crs=4326)
+
+head(data.frame(restaurants_points))
+tm_shape(relevant_SanFran_tracts_7132) +
+  tm_polygons(alpha=0.5) +
+tm_shape(restaurants_points) +
+  tm_dots(col='blue')
+```
+
+# Step 6: Process traffic density (San Fran Lyft wheel bike rides) data
+
+## 6.1 Load in the traffic density data
+```{r}
+bike_trips <- read.csv("./GIS3RawData/201906-baywheels-tripdata.csv")
+head(bike_trips)
+```
+
+## 6.2 Aggregate trips to trips by destination, and convert to csv
+```{r}
+trips_by_destination = 
+  bike_trips %>% 
+  group_by(end_station_id, end_station_longitude, end_station_latitude) %>% 
+  summarize(num_trips = n()) %>%
+  rename(end_long = 'end_station_longitude', end_lat = 'end_station_latitude')
+
+trips_by_destination
+
+trips_by_destination_points <- 
+  st_as_sf(trips_by_destination, coords=c('end_long','end_lat'), crs=4326)
+
+tm_shape(relevant_SanFran_tracts_7132) +
+  tm_polygons(alpha=0.5) +
+tm_shape(trips_by_destination_points) +
+  tm_dots(col='red')
+```
+
+# Step 7: Wrangling college location data
+## 7.1 Load college data
+```{r}
+colleges_raw <- read.csv("./GIS3RawData/Map_of_Colleges_in_San_Francisco__2011_.csv")
+head(colleges_raw)
+```
+
+## 7.2 Convert college location data into spatial long lat format
+```{r}
+colleges_processing <- colleges_raw
+str(colleges_processing)
+
+# String wrangling to convert Location column into long lat
+colleges_processing$Location <-
+  gsub("\\(", "", colleges_processing$Location)
+colleges_processing$Location <-
+  gsub("\\)", "", colleges_processing$Location)
+colleges_processing$Location <-
+  gsub(" ", "", colleges_processing$Location)
+
+colleges_processing
+
+colleges_processing <-
+  separate(data = colleges_processing,
+           col = Location, into = c("lat", "long"), sep = ",")
+
+colleges_processing$long <- as.numeric(as.character(colleges_processing$long))
+colleges_processing$lat <- as.numeric(as.character(colleges_processing$lat))
+
+colleges_processing <-
+  colleges_processing %>% select(ID, Institution, long, lat) %>% drop_na()
+
+head(colleges_processing)
+summary(colleges_processing)
+
+# Final save of college points
+colleges_points <-
+  st_as_sf(colleges_processing, coords = c('long', 'lat'), crs = 4326) %>% 
+  st_transform(4326)
+
+head(data.frame(colleges_points))
+
+plot(colleges_points)
+```
+
+# Step 8: Transform all cleaned data files into EPSG 4326
+```{r}
+# Polygons of tracts that contain pokemon spawn points
+relevant_SanFran_tracts_4326 <-
+  relevant_SanFran_tracts_7131 %>% st_transform(4326)
+
+st_write(relevant_SanFran_tracts_4326, "./GIS3SpatialRawData/RelevantSanFranTracts4326.geojson")
+
+# Polygons of pokemon spawn points with pokemon spawn count and census tract attributes
+pokemon_point_counts_SanFran_ACS <-
+  pokemon_point_counts_SanFran_ACS %>% st_transform(4326)
+
+st_write(pokemon_point_counts_SanFran_ACS, "./GIS3SpatialRawData/PokemonPointsACS.geojson")
+
+# Point locations of "posh" restaurants like boba shops and cafes
+posh_restaurants_points <-
+  posh_restaurants_points %>% st_transform(4326)
+
+st_write(posh_restaurants_points, "./GIS3SpatialRawData/PoshRestaurantPoints.geojson")
+
+# Point locations of general restaurants
+restaurants_points <-
+  restaurants_points %>% st_transform(4326)
+
+st_write(restaurants_points, "./GIS3SpatialRawData/RestaurantPoints.geojson")
+
+# Point locations of Lyft wheel trip destinations, with count by destination of trip as an attribute
+trips_by_destination_points <-
+  trips_by_destination_points %>% st_transform(4326)
+
+st_write(trips_by_destination_points,
+         "./GIS3SpatialRawData/TripsByDestination.geojson")
+
+# Locations of colleges in San Fran
+colleges_points <-
+  colleges_points %>% 
+  st_transform(4326)
+
+st_write(colleges_points, "./GIS3SpatialRawData/CollegePoints.geojson")
+```

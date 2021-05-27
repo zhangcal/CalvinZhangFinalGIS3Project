@@ -1,0 +1,137 @@
+---
+title: "GIS 3 Final Data Processing "
+output: html_notebook
+---
+
+# Purpose
+After cleaning the raw data in the "GIS3RawDataProcessing" file, we have separate shapefiles of the cleaned data (e.g. pokemon spawns with census tract attributes, posh restaurant locations, etc.) We then put these files into CARTO PostGIS to combine them together (e.g. pokemon spawn points will now have the number of colleges within a certain radius). 
+
+Here, we do one final round of cleaning with the CARTO data.
+
+# Step 0: Libraries
+```{r}
+library(tidyverse)
+library(sf)
+setwd("~/Desktop/GIS3FinalProject")
+```
+
+# Step 1: Load in CARTO data of pokemon point level rows
+```{r}
+cartodata <- 
+  st_read("./GIS3CartoProcessedData/PokemonACSPoshCollegesBikes.geojson") %>% st_transform(4326)
+
+head(data.frame(cartodata))
+
+length(unique(cartodata$geofips))
+```
+
+# Step 2: Mutating some more variables in CARTO point level data
+```{r}
+cartodata_processing <-
+  cartodata
+
+cartodata_processing <-
+  cartodata_processing %>%
+  replace_na(list(c_2km=0)) %>%
+  mutate(
+    # If station is farther away than 2 km, say there are 0 trips in closest station
+    num_trips = ifelse(station_km > 2, 0, num_trips),
+         # indicator for whether if distance to posh restaurant < 1 km
+         posh_close = ifelse(posh_distm <= 100, 1, 0)) %>%
+  relocate(posh_close, .after='posh_distm') 
+
+cartodata_processing$numpokemon <- as.numeric(cartodata_processing$numpokemon)
+cartodata_processing$pinc <- as.numeric(cartodata_processing$pinc)
+cartodata_processing$commute <- as.numeric(cartodata_processing$commute)
+
+cartodata_as_table <-
+  data.frame(cartodata_processing)
+
+cartodata_as_table
+cartodata_as_table %>% filter(station_km > 2)
+cartodata_as_table %>% filter(station_km < 2)
+
+PokePointsFinal <- cartodata_processing
+plot(PokePointsFinal)
+```
+# Step 3: Save point level Pokemon data
+```{r}
+st_write(PokePointsFinal, './FinalData/PokePointsFinal.geojson')
+```
+
+# Step 4: Instead of having point level data, let's try to aggregate these points up to their census tracts
+```{r}
+PokemonTracts <-
+  cartodata_as_table %>% group_by(geofips) %>%
+  summarize(tpokemon = sum(numpokemon), 
+            tpop = mean(tpop), 
+            pden = mean(pden),
+            uemp = mean(uemp,),
+            pinc = mean(pinc),
+            ag_rent = mean(ag_rent),
+            commute = mean(commute),
+            minoprp = mean(minoprp),
+            aprp = mean(aprp),
+            bprp = mean(bprp),
+            hprp = mean(hprp), 
+            mNumTrips = median(num_trips),
+            mStationKm = median(station_km),
+            mC2km = median(c_2km), 
+            mPoshDistM = median(posh_distm),
+            PoshPrp = median(posh_close)
+            )
+
+head(data.frame(PokemonTracts))
+str(PokemonTracts)
+```
+# Step 5: Merge Pokemon point data aggregated to the census tract level with census tract polygons, so that we have polygon shapefile 
+```{r}
+SanFranTracts <-
+  st_read("./GIS3SpatialRawData/RelevantsSanFranTracts4326WithArea.geojson") %>%
+  st_transform(4326) %>%
+  select(geoid10, area_100sqm) %>%
+  mutate(geofips = as.numeric(geoid10)) %>%
+  select(-geoid10)
+
+head(data.frame(SanFranTracts))
+
+PokeTractsFinal <- 
+  merge(SanFranTracts, PokemonTracts, by ='geofips', all.x=TRUE) %>%
+  mutate(pokemon_density = tpokemon / area_100sqm) %>%
+  mutate(pokemon_pc = ifelse(is.infinite(tpokemon / tpop), 0, tpokemon / tpop)) %>%
+  relocate(pokemon_density, .after='tpokemon')
+
+head(data.frame(PokeTractsFinal))
+```
+# Step 6: Save the tract aggregated data
+```{r}
+st_write(PokeTractsFinal, "./FinalData/PokeTractsFinal.geojson")
+```
+
+
+# Step 7: Some exploratory regressions
+```{r}
+# Tract level regression
+reg <-
+  lm(data=data.frame(PokeTractsFinal),
+   formula=
+     pokemon_density ~  pden + pinc + 
+     ag_rent + commute + bprp + hprp + aprp + mNumTrips + mStationKm + mC2km +
+     mPoshDistM)
+
+summary(reg)
+```
+
+```{r}
+# Point level regression
+reg_points <-
+  lm(data= data.frame(PokePointsFinal),
+   formula=
+     numpokemon ~  pden + pinc + 
+     ag_rent + commute + bprp + hprp + aprp + num_trips + station_km + c_2km +
+     posh_distm)
+
+summary(reg_points)
+```
+
+

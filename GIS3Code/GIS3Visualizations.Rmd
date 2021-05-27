@@ -1,0 +1,72 @@
+---
+title: "GIS3 Exploratory Visualizations"
+output: html_notebook
+---
+
+# Purpose
+The purpose of this file is to exploratory visualization of the files outputted in "GIS 3 Final Data Processing". 
+
+# Step 0: Libraries
+```{r}
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(tmap)
+library(RColorBrewer)
+setwd("~/Desktop/GIS3FinalProject")
+```
+
+# Step 1: Load in tract level data
+```{r}
+PokeTracts <- st_read('./FinalData/PokeTractsFinal.geojson') %>% st_transform(4326)
+
+PokeTractsTable <- data.frame(PokeTracts)
+```
+# Step 2: Exploratory plots of pokemon counts (x axis) on a variety of attributes (y axis)
+```{r fig.height=3, fig.width = 5}
+PokeTractsTable_short <-
+  PokeTractsTable %>% select(-geofips, -area_100sqm, -tpokemon, -tpop, -PoshPrp, -pokemon_pc, -geometry) %>% drop_na()
+
+PokeTractsTable_short_gathered <-
+  PokeTractsTable_short %>%
+  pivot_longer(c(-pokemon_density),
+               names_to = "variable", values_to = "value")
+
+PokeTractsTable_short_gathered
+
+ggplot(PokeTractsTable_short_gathered, 
+       aes(x = pokemon_density, y = value)) +
+  geom_point() +
+  geom_smooth(method='lm', formula = y ~x) + 
+  facet_wrap(~variable, scales='free')+
+  scale_color_viridis_d()
+```
+# Step 3: Spatial visualizations of the most interesting variables with tmap
+```{r}
+tm_shape(PokeTracts) +
+  tm_fill(col='pokemon_density', 
+              title = 'Pokemon per 100 m^2',
+              pal='YlGnBu', 
+              style='jenks',
+              legend.hist=TRUE)  +
+  tm_borders(col='black') + 
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "left")
+  
+tm_shape(PokeTracts) +
+  tm_fill(col='mPoshDistM', 
+              title = 'Median distance (m) to\nclosest posh restaurant',
+              pal='-YlOrRd', style='jenks') +
+  tm_borders(col='black') + 
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "left")
+
+tm_shape(PokeTracts) +
+  tm_fill(col='bprp', 
+              title = 'Proportion of population, black',
+              pal='-Greens', style='jenks') +
+  tm_borders(col='black') + 
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "left")
+```
+

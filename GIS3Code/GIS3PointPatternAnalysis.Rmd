@@ -1,0 +1,94 @@
+---
+title: "Nearest neighbor analysis of Pokemon points"
+output: html_notebook
+---
+# Purpose: 
+This is the final workflow file. We take processed data from the FinalData folder and do some point pattern analysis with the pokemon point level data.
+
+It seems that pokemon point spawn locations are not so much determined by neighborhood characteristics, but by where other points are! Let's investigate the tendency of pokemon spawn points to co-locate further, through point pattern analysis (distance to nth nearest neighbors). 
+
+# 0 Libraries
+```{r}
+library(spatstat)
+library(sf)
+library(tidyverse)
+setwd("~/Desktop/GIS3FinalProject")
+```
+
+# Step 1: Pre processing
+## 1.1 Load point data in sf (epsg 7131)
+```{r}
+poke_points  <- 
+  st_read("./FinalData/ShapefileVersions/NoNAPokePointsFinal7131.shp")  
+
+plot(poke_points)
+```
+## 1.2 Convert points shapefile to spatstat format (ppp)
+```{r}
+poke_points  <- as.ppp(poke_points)
+marks(poke_points) <- NULL
+poke_points.km <- rescale(poke_points, 1000, "km") # EPSG 7131 is in meters, times 1000 to km
+plot(poke_points.km)
+```
+# Step 2: Analyze Average distance to the nth nearest neighbor point
+## 2.1: Calculate average distance to the nth nearest neighbor point
+```{r}
+mean(nndist(poke_points.km, k=1))
+mean(nndist(poke_points.km, k=2))
+
+# ANN stands for average nth neighbor (ANN) distance
+ANN <- apply(nndist(poke_points.km, k=1:500),2,FUN=mean)
+```
+
+## 2.2: Plot average distance to the 1st, 2nd, ..., 500th nearest neighbors
+```{r}
+n_nearest_dist <- data.frame(nth_nearest = 1:500, distkm = ANN)
+
+ggplot(data = n_nearest_dist) +
+  geom_point(aes(x=nth_nearest, y=distkm,col=-distkm)) +
+  ggtitle("Distance in km to nth nearest neighbor") +
+  xlab("Nth nearest neighbor") + 
+  ylab("Average distance to neighbor in km") + 
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5))
+```
+# Step 3 Comparing actual 1st nearest neighbor distances to randomized results
+
+## 3.1 Create randomnized points and calculate their average 1st nearest neighbor distances
+```{r}
+# Simulate random points N times, and for each simulation, store the average 1st nearest neighbor distances in ANN.r
+
+n     <- 599L               # Number of simulations
+ANN.r <- vector(length = n) # Vector to store random (r) average nearest neighbor distances (ANN)
+for (i in 1:n){
+  rand.p   <- rpoint(n=poke_points.km$n, win=poke_points.km)  # Generate random point locations
+  ANN.r[i] <- mean(nndist(rand.p, k=1))  # Tally the average neearest neighbor distance
+}
+
+plot(rand.p)
+```
+
+## 3.2 Compare randomnized points' average nearest neighbor distances to actual average nearest neighbor distance
+```{r}
+# Actual distance
+ANN.p <- mean(nndist(poke_points.km, k=1))
+
+# Convert vector of simulated average nearest neighbor distances to dataframe
+random_nearest1 <- data.frame(random_dist = ANN.r)
+
+# Plot results
+ggplot(data = random_nearest1) +
+  geom_histogram(aes(x=random_dist), fill="blue", bins=2000) +
+  geom_vline(aes(xintercept = ANN.p), col='red') +
+  xlab("Distance to 1st nearest neighbor, km") +
+  ylab("Frequency") + 
+  ggtitle("Frequency of distance in km to nth nearest neighbor, 
+          actual (red) vs.random (blue) ") +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) 
+```
+## 3.3 Calculate pseudo p value for significance of average 1st nearest neighbor distance
+```{r}
+N.greater <- sum(ANN.r > ANN.p)
+pseudo_p <- min(N.greater + 1, n + 1 - N.greater) / (n +1)
+pseudo_p
+```
+

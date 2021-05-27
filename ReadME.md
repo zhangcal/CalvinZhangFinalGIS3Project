@@ -9,7 +9,8 @@ The other folders are:
 
 -   GIS3Code: Contains all code, R and SQL, used in this project. I
     annotate my code with some some high-level comments if you are
-    interested.
+    interested. Please **download** the html files locally to view them.
+    Html does not render correctly in github.
 -   GIS3RawData: Raw data directly downloaded from the relevant
     locations.
 -   GIS3SpatialRawData: Spatialized and cleaned versions of the raw data
