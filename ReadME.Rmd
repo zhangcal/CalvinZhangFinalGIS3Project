@@ -7,7 +7,7 @@ output: github_document
 # Startup
 This ReadMe file is the main presentation of results from my project. The other folders are:
 
-* GIS3Code: Contains all code, R and SQL, used in this project. I annotate my code with some some high-level comments if you are interested.
+* GIS3Code: Contains all code, R and SQL, used in this project. I annotate my code with some some high-level comments if you are interested. Please **download** the html files locally to view them. Html does not render correctly in github. 
 * GIS3RawData: Raw data directly downloaded from the relevant locations.
 * GIS3SpatialRawData: Spatialized and cleaned versions of the raw data (e.g. `csv` of long lats to a `shapefile`)
 * GIS3CartoProcessedData: CARTO (`PostGIS`) processed versions of the spatialized raw data. 
