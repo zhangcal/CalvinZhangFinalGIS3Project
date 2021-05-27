@@ -509,10 +509,10 @@ distance, but results are similar for higher orders of *n*.
 
 #### Figure 12: Actual vs randomnized pokemon spawn locations in San Francisco
 
-![](./GIS3PointPatterns/GIS3Randomnization.png) \#\#\#\# Figure 13:
-Density of actual average distance to 1st nearest neighbor (red)
-vs. average distances to 1st nearest neighbor after various rounds of
-randomnization
+![](./GIS3PointPatterns/GIS3Randomnization.png)
+
+#### Figure 13: Density of actual average distance to 1st nearest neighbor (red) vs. average distances to 1st nearest neighbor after various rounds of randomnization
+
 ![](./GIS3PointPatterns/GIS3PointRandomnizationResults.png)
 
 Figure 13 shows that our actual average distance to the 1st nearest
